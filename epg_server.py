@@ -376,12 +376,18 @@ def build_epg_json(c, per=4):
     now = int(time.time())
     km = keymap(c)
     progs = {}
-    for r in c.execute("SELECT channel_id,start,stop,title FROM epg_programmes WHERE stop>? AND start<? "
-                       "ORDER BY channel_id,start", (now, now + 86400)):
+    # The import counters include the whole feed. Do not restrict the public
+    # export to a 24-hour window: a feed with a later schedule would otherwise
+    # report thousands of imported programmes but serialize no channels.
+    for r in c.execute("SELECT channel_id,start,stop,title FROM epg_programmes WHERE stop>? "
+                       "ORDER BY channel_id,start", (now,)):
         lst = progs.setdefault(r["channel_id"], [])
         if len(lst) < per:
             lst.append([r["start"], r["stop"], r["title"]])
     channels = {k: progs[cid] for k, cid in km.items() if cid in progs}
+    if not channels:
+        raise EpgError("No se puede generar epg.json: no hay canales con programas vigentes o futuros. "
+                       "Comprueba las fechas de la guía y la hora del sistema.")
     ok = c.execute("SELECT finished FROM epg_sync WHERE status='ok' ORDER BY id DESC LIMIT 1").fetchone()
     body = json.dumps({"updated": ok["finished"] if ok else None, "generated": now, "channels": channels},
                       ensure_ascii=False, separators=(",", ":")).encode("utf-8")
